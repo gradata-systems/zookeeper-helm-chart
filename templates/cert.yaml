@@ -1,0 +1,24 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "zookeeper.fullname" . }}
+  labels:
+    {{- include "zookeeper.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "zookeeper.fullname" . }}-tls
+  commonName: {{ include "zookeeper.fullname" . }}
+  dnsNames:
+    - {{ include "zookeeper.fullname" . }}.{{ .Release.Namespace }}.svc
+    {{- include "zookeeper.serverList" . | nindent 4 }}
+  usages:
+    - server auth
+    - client auth
+  duration: {{ .Values.certificate.duration }}
+  renewBefore: {{ .Values.certificate.renewBefore }}
+  keystores:
+    pkcs12:
+      create: true
+      passwordSecretRef:
+        {{- toYaml .Values.certificate.keystorePasswordSecretRef | nindent 8 }}
+  issuerRef:
+    {{- toYaml .Values.certificate.issuerRef | nindent 4 }}

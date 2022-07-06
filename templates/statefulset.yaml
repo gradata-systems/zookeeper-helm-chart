@@ -1,0 +1,197 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "zookeeper.fullname" . }}
+  labels:
+    {{- include "zookeeper.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "zookeeper.fullname" . }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "zookeeper.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "zookeeper.selectorLabels" . | nindent 8 }}
+    spec:
+      initContainers:
+        {{- /* If a Zookeeper server ID doesn't exist, generate a unique ID and store on the file system. */}}
+        - name: generate-server-id
+          image: {{ if .Values.containerRegistry }}{{ (printf "%s/" .Values.containerRegistry) }}{{ end }}{{ "busybox" }}
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f "/data/myid" ] && [ -z "$(cat /data/myid)" ]; then
+                server_id="$(((${HOSTNAME##*-})+1))"
+                echo $server_id > /data/myid
+                echo "Set node ID to: $server_id"
+              fi
+          volumeMounts:
+            - mountPath: /data
+              subPath: data
+              name: data
+        {{- /* Expand environment variables in the config as ZK doesn't do this.
+        Also generate the healthcheck script used by probes. This is required due to the need to dynamically build the
+        `CLIENT_JVMFLAGS` environment variable (required by `zsServer.sh status`). */}}
+        - name: generate-config
+          image: {{ if .Values.containerRegistry }}{{ (printf "%s/" .Values.containerRegistry) }}{{ end }}{{ "busybox" }}
+          command:
+            - sh
+            - -c
+            - |
+              zooCfg=/scratch/zoo.cfg;
+              cat /base/zoo.cfg > $zooCfg;
+              tee -a $zooCfg <<EOF_ZOO_CFG
+              ssl.quorum.keyStore.password=${KEYSTORE_PASSWORD}
+              ssl.quorum.trustStore.password=${KEYSTORE_PASSWORD}
+              ssl.keyStore.password=${KEYSTORE_PASSWORD}
+              ssl.trustStore.password=${KEYSTORE_PASSWORD}
+              secureClientPortAddress=$(hostname -f)
+              EOF_ZOO_CFG
+
+              tee /scratch/healthcheck.sh <<EOF_HEALTHCHECK
+              #!/bin/bash
+              export CLIENT_JVMFLAGS="\
+              -Dzookeeper.clientCnxnSocket=org.apache.zookeeper.ClientCnxnSocketNetty \
+              -Dzookeeper.ssl.keyStore.location=/pki/keystore.p12 \
+              -Dzookeeper.ssl.keyStore.password=${KEYSTORE_PASSWORD} \
+              -Dzookeeper.ssl.trustStore.location=/pki/truststore.p12 \
+              -Dzookeeper.ssl.trustStore.password=${KEYSTORE_PASSWORD}"
+              bash -e ./bin/zkServer.sh status
+              EOF_HEALTHCHECK
+
+              chmod +x /scratch/healthcheck.sh
+          env:
+            - name: KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- toYaml .Values.certificate.keystorePasswordSecretRef | nindent 18 }}
+          volumeMounts:
+            - mountPath: /base/zoo.cfg
+              subPath: zoo.cfg
+              name: config
+            - mountPath: /scratch
+              name: scratch
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ if .Values.containerRegistry }}{{ (printf "%s/" .Values.containerRegistry) }}{{ end }}{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: JVMFLAGS
+              value: {{ .Values.jvmOpts | quote }}
+          ports:
+            {{- range $name, $value := .Values.ports }}
+            - name: {{ $name }}
+              containerPort: {{ $value }}
+              protocol: TCP
+            {{- end }}
+          volumeMounts:
+            - mountPath: /conf/zoo.cfg
+              subPath: zoo.cfg
+              name: scratch
+            - mountPath: /bin/healthcheck.sh
+              subPath: healthcheck.sh
+              name: scratch
+            - mountPath: /pki/keystore.p12
+              subPath: keystore.p12
+              name: cert
+              readOnly: true
+            - mountPath: /pki/truststore.p12
+              subPath: truststore.p12
+              name: cert
+              readOnly: true
+            - mountPath: /data
+              subPath: data
+              name: data
+            - mountPath: /datalog
+              subPath: datalog
+              name: data
+            - mountPath: /logs
+              subPath: logs
+              name: data
+          startupProbe:
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 3
+            exec:
+              command: [ "/bin/healthcheck.sh" ]
+          livenessProbe:
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            exec:
+              command: [ "/bin/healthcheck.sh" ]
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: cert
+          secret:
+            secretName: {{ include "zookeeper.fullname" . }}-tls
+        - name: config
+          configMap:
+            name: {{ include "zookeeper.fullname" . }}
+        - name: scratch
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "zookeeper.labels" . | nindent 10 }}
+      spec:
+        volumeName: {{ .Values.volumeClaim.volumeName | quote }}
+        storageClassName: {{ .Values.volumeClaim.storageClassName | quote }}
+        selector:
+          {{- with .Values.volumeClaim.selector.matchLabels }}
+          matchLabels:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.volumeClaim.selector.matchExpressions }}
+          matchExpressions:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- with .Values.volumeClaim.dataSource }}
+        dataSource:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.volumeClaim.accessModes }}
+        accessModes:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.volumeClaim.volumeMode }}
+        volumeMode:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.volumeClaim.resources.requests.storage }}
+          limits:
+            storage: {{ .Values.volumeClaim.resources.limits.storage }}

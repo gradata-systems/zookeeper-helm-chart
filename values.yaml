@@ -1,0 +1,102 @@
+# Default values for zookeeper.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 3
+
+# Custom container registry, used as a prefix when pulling images
+containerRegistry: ""
+
+image:
+  repository: zookeeper
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+jvmOpts: -Xms256m -Xmx256m
+
+# Number of milliseconds comprising one tick (unit of time)
+tickTime: 2000
+
+# Number of ticks to allow for followers to connect and sync to a leader
+initLimit: 30
+
+# Amount of time in ticks, to allow followers to sync with Zookeeper
+syncLimit: 2
+
+# Maximum number of client connections
+maxClientConnections: 60
+
+# Whether to allow growing/shrinking the cluster. Recommended to be `false`.
+standaloneEnabled: false
+
+autoPurge:
+  purgeInterval: 0
+  snapRetainCount: 3
+
+adminServer:
+  enabled: true
+
+# List of four-letter-word commands that are enabled for external clients.
+# By default, only `srvr` is enabled.
+commandWhitelist:
+  - srvr
+  - mntr
+  - conf
+  - ruok
+
+extraConfig: []
+# - reconfigEnabled=true
+
+ports:
+  client: 2181
+  follower: 2888
+  election: 3888
+  admin: 8080
+
+volumeClaim:
+  volumeName: ""
+  storageClassName: ""
+  selector:
+    matchLabels: { }
+    matchExpressions: { }
+  dataSource: { }
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: { }
+  resources:
+    requests:
+      storage: ""
+    limits:
+      storage: ""
+
+podAnnotations: { }
+
+certificate:
+  duration: 8760h # 365 days
+  renewBefore: 168h # 7 days
+  keystorePasswordSecretRef:
+    name: ""
+    key: password
+  issuerRef:
+    name: ""
+    kind: ClusterIssuer
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+    storage: 1Gi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+    storage: 2Gi
+
+nodeSelector: { }
+
+tolerations: [ ]
+
+affinity: { }
