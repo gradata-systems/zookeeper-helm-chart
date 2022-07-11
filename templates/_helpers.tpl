@@ -51,17 +51,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Create the name of the service account to use
-*/}}
-{{- define "zookeeper.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "zookeeper.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
-{{- end }}
-
-{{/*
 Prefixes an image with the custom container registry, if provided
 */}}
 {{- define "zookeeper.image" -}}
@@ -77,30 +66,9 @@ Generate a list of servers based on the number of replicas
 {{- define "zookeeper.servers" -}}
 {{- range $i, $e := until (.Values.replicaCount | int) }}
 {{- $fullName := ( include "zookeeper.fullname" $ ) }}
-{{- $hostName := ( printf "%s-%d.%s.%s.svc.cluster.local" $fullName $i $fullName $.Release.Namespace ) }}
+{{- $hostName := ( printf "%s-%d.%s.%s" $fullName $i $fullName $.Release.Namespace ) }}
 {{- $ports := $.Values.ports }}
 {{- printf "server.%d=%s:%d:%d\n" (add $i 1) $hostName ($ports.follower | int) ($ports.election | int) }}
-{{- end }}
-{{- end }}
-
-{{- define "zookeeper.serverList" -}}
-{{- range $i, $e := until (.Values.replicaCount | int) }}
-{{- $fullName := ( include "zookeeper.fullname" $ ) }}
-{{- $podName := printf "%s-%d" $fullName $i }}
-{{- $ports := $.Values.ports }}
-{{- printf "- %s.%s.%s\n" $podName $fullName $.Release.Namespace }}
-{{- printf "- %s.%s.%s.svc.cluster.local\n" $podName $fullName $.Release.Namespace }}
-{{- end }}
-{{- end }}
-
-{{/*
-Zookeeper connection string
-*/}}
-{{- define "zookeeper.connectionString" -}}
-{{- range $i, $e := until (.Values.replicaCount | int) }}
-{{- $fullName := (include "zookeeper.fullname" $) }}
-{{- $hostName := ( printf "%s-%d.%s" $fullName $i $fullName ) }}
-{{- printf "%s:%d," $hostName ($.Values.ports.client | int) }}
 {{- end }}
 {{- end }}
 

@@ -16,6 +16,9 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 
+# Set to `true` to pause at startup before loading the application
+debugStartup: false
+
 jvmOpts: -Xms256m -Xmx256m
 
 # Number of milliseconds comprising one tick (unit of time)

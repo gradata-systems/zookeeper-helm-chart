@@ -1,3 +1,4 @@
+{{- $tlsDir := "/opt/tls" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -22,13 +23,68 @@ data:
     secureClientPort={{ .Values.ports.client }}
     sslQuorum=true
     serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
-    ssl.quorum.keyStore.location=/pki/keystore.p12
-    ssl.quorum.trustStore.location=/pki/truststore.p12
-    ssl.keyStore.location=/pki/keystore.p12
-    ssl.trustStore.location=/pki/truststore.p12
+    ssl.quorum.keyStore.location={{ $tlsDir }}/keystore.p12
+    ssl.quorum.trustStore.location={{ $tlsDir }}/truststore.p12
+    ssl.keyStore.location={{ $tlsDir }}/keystore.p12
+    ssl.trustStore.location={{ $tlsDir }}/truststore.p12
 
     {{- if .Values.extraConfig }}
     {{- range .Values.extraConfig }}
     {{ . | nindent 4 }}
     {{- end }}
     {{- end }}
+
+  startup.sh: |
+    #!/bin/bash -e
+
+    {{- /* Generate a unique server ID if one isn't already assigned */}}
+    if [ ! -f "/data/myid" ] && [ -z "$(cat /data/myid)" ]; then
+      server_id="$(((${HOSTNAME##*-})+1))"
+      echo $server_id > /data/myid
+      echo "Set node ID to: $server_id"
+    fi
+
+    {{- /* Append zookeeper config properties that depend on environment variables */}}
+    zooCfg=/conf/zoo.cfg;
+    cat /conf/zoo-base.cfg > $zooCfg;
+    tee -a $zooCfg >/dev/null <<EOF_ZOO_CFG
+    ssl.quorum.keyStore.password=${KEYSTORE_PASSWORD}
+    ssl.quorum.trustStore.password=${KEYSTORE_PASSWORD}
+    ssl.keyStore.password=${KEYSTORE_PASSWORD}
+    ssl.trustStore.password=${KEYSTORE_PASSWORD}
+    secureClientPortAddress=$(hostname -f)
+    EOF_ZOO_CFG
+
+    {{- /* Generate a TLS cert for this node from the CSI-provided certificates and private key */}}
+    cert_dir='/opt/certmanager'
+    tls_dir='{{ $tlsDir }}'
+    rm -rf $tls_dir/*
+    openssl pkcs12 -export \
+      -in $cert_dir/tls.crt \
+      -inkey $cert_dir/tls.key \
+      -CAfile $cert_dir/ca.crt \
+      -passout "pass:${KEYSTORE_PASSWORD}" \
+      -out $tls_dir/keystore.p12
+    keytool -import -noprompt -trustcacerts \
+      -file $cert_dir/ca.crt \
+      -storepass "${KEYSTORE_PASSWORD}" \
+      -destkeystore $tls_dir/truststore.p12 \
+      -deststoretype pkcs12
+
+    chmod 600 $tls_dir/*
+
+    {{- if .Values.debugStartup }}
+    sleep 1000000
+    {{- end }}
+
+    exec /docker-entrypoint.sh zkServer.sh start-foreground
+
+  healthcheck.sh: |
+    #!/bin/bash
+    export CLIENT_JVMFLAGS="\
+    -Dzookeeper.clientCnxnSocket=org.apache.zookeeper.ClientCnxnSocketNetty \
+    -Dzookeeper.ssl.keyStore.location={{ $tlsDir }}/keystore.p12 \
+    -Dzookeeper.ssl.keyStore.password=${KEYSTORE_PASSWORD} \
+    -Dzookeeper.ssl.trustStore.location={{ $tlsDir }}/truststore.p12 \
+    -Dzookeeper.ssl.trustStore.password=${KEYSTORE_PASSWORD}"
+    bash -e ./bin/zkServer.sh status

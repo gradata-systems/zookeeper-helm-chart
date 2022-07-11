@@ -20,72 +20,18 @@ spec:
       labels:
         {{- include "zookeeper.selectorLabels" . | nindent 8 }}
     spec:
-      initContainers:
-        {{- /* If a Zookeeper server ID doesn't exist, generate a unique ID and store on the file system. */}}
-        - name: generate-server-id
-          image: {{ if .Values.containerRegistry }}{{ (printf "%s/" .Values.containerRegistry) }}{{ end }}{{ "busybox" }}
-          command:
-            - sh
-            - -c
-            - |
-              if [ ! -f "/data/myid" ] && [ -z "$(cat /data/myid)" ]; then
-                server_id="$(((${HOSTNAME##*-})+1))"
-                echo $server_id > /data/myid
-                echo "Set node ID to: $server_id"
-              fi
-          volumeMounts:
-            - mountPath: /data
-              subPath: data
-              name: data
-        {{- /* Expand environment variables in the config as ZK doesn't do this.
-        Also generate the healthcheck script used by probes. This is required due to the need to dynamically build the
-        `CLIENT_JVMFLAGS` environment variable (required by `zsServer.sh status`). */}}
-        - name: generate-config
-          image: {{ if .Values.containerRegistry }}{{ (printf "%s/" .Values.containerRegistry) }}{{ end }}{{ "busybox" }}
-          command:
-            - sh
-            - -c
-            - |
-              zooCfg=/scratch/zoo.cfg;
-              cat /base/zoo.cfg > $zooCfg;
-              tee -a $zooCfg <<EOF_ZOO_CFG
-              ssl.quorum.keyStore.password=${KEYSTORE_PASSWORD}
-              ssl.quorum.trustStore.password=${KEYSTORE_PASSWORD}
-              ssl.keyStore.password=${KEYSTORE_PASSWORD}
-              ssl.trustStore.password=${KEYSTORE_PASSWORD}
-              secureClientPortAddress=$(hostname -f)
-              EOF_ZOO_CFG
-
-              tee /scratch/healthcheck.sh <<EOF_HEALTHCHECK
-              #!/bin/bash
-              export CLIENT_JVMFLAGS="\
-              -Dzookeeper.clientCnxnSocket=org.apache.zookeeper.ClientCnxnSocketNetty \
-              -Dzookeeper.ssl.keyStore.location=/pki/keystore.p12 \
-              -Dzookeeper.ssl.keyStore.password=${KEYSTORE_PASSWORD} \
-              -Dzookeeper.ssl.trustStore.location=/pki/truststore.p12 \
-              -Dzookeeper.ssl.trustStore.password=${KEYSTORE_PASSWORD}"
-              bash -e ./bin/zkServer.sh status
-              EOF_HEALTHCHECK
-
-              chmod +x /scratch/healthcheck.sh
-          env:
-            - name: KEYSTORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  {{- toYaml .Values.certificate.keystorePasswordSecretRef | nindent 18 }}
-          volumeMounts:
-            - mountPath: /base/zoo.cfg
-              subPath: zoo.cfg
-              name: config
-            - mountPath: /scratch
-              name: scratch
       containers:
         - name: {{ .Chart.Name }}
           image: {{ if .Values.containerRegistry }}{{ (printf "%s/" .Values.containerRegistry) }}{{ end }}{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
           imagePullPolicy: IfNotPresent
+          command: [ "/bin/startup.sh" ]
           env:
             - name: JVMFLAGS
               value: {{ .Values.jvmOpts | quote }}
+            - name: KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- toYaml .Values.certificate.keystorePasswordSecretRef | nindent 18 }}
           ports:
             {{- range $name, $value := .Values.ports }}
             - name: {{ $name }}
@@ -93,29 +39,32 @@ spec:
               protocol: TCP
             {{- end }}
           volumeMounts:
-            - mountPath: /conf/zoo.cfg
+            - mountPath: /conf/zoo-base.cfg
+              name: config
               subPath: zoo.cfg
-              name: scratch
+              readOnly: true
+            - mountPath: /bin/startup.sh
+              name: config
+              subPath: startup.sh
+              readOnly: true
             - mountPath: /bin/healthcheck.sh
+              name: config
               subPath: healthcheck.sh
-              name: scratch
-            - mountPath: /pki/keystore.p12
-              subPath: keystore.p12
-              name: cert
               readOnly: true
-            - mountPath: /pki/truststore.p12
-              subPath: truststore.p12
-              name: cert
+            - mountPath: /opt/certmanager
+              name: certs
               readOnly: true
+            - mountPath: /opt/tls
+              name: tls
             - mountPath: /data
+              name: data
               subPath: data
-              name: data
             - mountPath: /datalog
+              name: data
               subPath: datalog
-              name: data
             - mountPath: /logs
-              subPath: logs
               name: data
+              subPath: logs
           startupProbe:
             initialDelaySeconds: 5
             periodSeconds: 3
@@ -138,7 +87,9 @@ spec:
               cpu: {{ .Values.resources.limits.cpu }}
               memory: {{ .Values.resources.limits.memory }}
       securityContext:
+        runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
       {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -153,14 +104,28 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumes:
-        - name: cert
-          secret:
-            secretName: {{ include "zookeeper.fullname" . }}-tls
         - name: config
           configMap:
             name: {{ include "zookeeper.fullname" . }}
-        - name: scratch
-          emptyDir: {}
+            defaultMode: 0500
+        - name: certs
+          csi:
+            driver: csi.cert-manager.io
+            volumeAttributes:
+              {{- with .Values.certificate }}
+              {{- $hostName := printf "${POD_NAME}.%s.%s" (include "zookeeper.fullname" $ ) $.Release.Namespace }}
+              csi.cert-manager.io/issuer-name: {{ .issuerRef.name | quote }}
+              csi.cert-manager.io/issuer-kind: {{ .issuerRef.kind | quote }}
+              csi.cert-manager.io/common-name: ${POD_NAME}.{{ include "zookeeper.fullname" $ }}
+              csi.cert-manager.io/dns-names: {{ $hostName }},{{ $hostName }}.svc.cluster.local
+              csi.cert-manager.io/duration: {{ .duration }}
+              csi.cert-manager.io/key-usages: server auth,client auth
+              csi.cert-manager.io/renew-before: {{ .renewBefore | quote }}
+              csi.cert-manager.io/fs-group: "1000"
+              {{- end }}
+            readOnly: true
+        - name: tls
+          emptyDir: { }
   volumeClaimTemplates:
     - metadata:
         name: data
