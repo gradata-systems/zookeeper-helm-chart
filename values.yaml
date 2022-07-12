@@ -76,8 +76,6 @@ volumeClaim:
     limits:
       storage: ""
 
-podAnnotations: { }
-
 certificate:
   duration: 8760h # 365 days
   renewBefore: 168h # 7 days
@@ -98,8 +96,7 @@ resources:
     memory: 512Mi
     storage: 2Gi
 
+podAnnotations: { }
 nodeSelector: { }
-
 tolerations: [ ]
-
 affinity: { }
