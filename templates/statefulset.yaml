@@ -20,6 +20,29 @@ spec:
       labels:
         {{- include "zookeeper.selectorLabels" . | nindent 8 }}
     spec:
+      initContainers:
+        - name: take-ownership
+          image: {{ .Values.image.busybox.repository }}
+          command:
+            - sh
+            - -c
+            - |
+              chown 1000:1000 /data/
+              chown 1000:1000 /datalog/
+              chown 1000:1000 /logs/
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - mountPath: /data
+              name: data
+              subPath: data
+            - mountPath: /datalog
+              name: data
+              subPath: datalog
+            - mountPath: /logs
+              name: data
+              subPath: logs
       containers:
         - name: {{ .Chart.Name }}
           image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
