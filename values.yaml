@@ -4,9 +4,6 @@
 
 replicaCount: 3
 
-# Custom container registry, used as a prefix when pulling images
-containerRegistry: ""
-
 image:
   repository: zookeeper
   pullPolicy: IfNotPresent
