@@ -51,16 +51,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Prefixes an image with the custom container registry, if provided
-*/}}
-{{- define "zookeeper.image" -}}
-{{- if $.Values.containerRegistry }}
-{{- $.Values.containerRegistry }}/
-{{- end }}
-{{- . }}
-{{- end }}
-
-{{/*
 Generate a list of servers based on the number of replicas
 */}}
 {{- define "zookeeper.servers" -}}

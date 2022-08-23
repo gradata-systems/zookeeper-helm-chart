@@ -92,7 +92,7 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 3
             timeoutSeconds: 3
-            failureThreshold: 3
+            failureThreshold: 10
             exec:
               command: [ "/bin/healthcheck.sh" ]
           livenessProbe:
