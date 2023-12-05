@@ -20,6 +20,7 @@ spec:
       labels:
         {{- include "zookeeper.selectorLabels" . | nindent 8 }}
     spec:
+      {{- if .Values.takeOwnershipOnStartup }}
       initContainers:
         - name: take-ownership
           image: {{ .Values.image.busybox.repository }}
@@ -43,6 +44,7 @@ spec:
             - mountPath: /logs
               name: data
               subPath: logs
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
@@ -109,6 +111,9 @@ spec:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}
               memory: {{ .Values.resources.limits.memory }}
+      {{- with .Values.serviceAccount }}
+      serviceAccountName: {{ .name | default (include "zookeeper.fullname" $) }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
