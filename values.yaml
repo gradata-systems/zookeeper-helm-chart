@@ -60,6 +60,7 @@ ports:
   election: 3888
   admin: 8080
 
+takeOwnershipOnStartup: true
 volumeClaim:
   volumeName: ""
   storageClassName: ""
