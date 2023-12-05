@@ -16,6 +16,12 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 
+serviceAccount:
+  # Name of the existing service account to use. If not defined, one is created.
+  name: ""
+  # Annotations to add to the service account
+  annotations: { }
+
 # Set to `true` to pause at startup before loading the application
 debugStartup: false
 
@@ -51,7 +57,7 @@ commandWhitelist:
   - conf
   - ruok
 
-extraConfig: []
+extraConfig: [ ]
 # - reconfigEnabled=true
 
 ports:
